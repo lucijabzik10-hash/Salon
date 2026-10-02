@@ -4,7 +4,7 @@
   "description": "Discord bot koji preko !saberi zbraja napravljeno, prodano i maknuto u zadanom vremenskom periodu.",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node index.js"
   },
   "engines": {
     "node": ">=18.17.0"
