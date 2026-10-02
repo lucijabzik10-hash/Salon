@@ -26,6 +26,37 @@ if (!REPORT_CHANNEL_ID) {
 }
 
 // ======================================================
+// POČETNO STANJE SA TEZGE
+// ======================================================
+
+const STARTING_STOCK = {
+  "Pecena patka": 191,
+  "Kaubojski Pasulj": 230,
+  "Kaubojska Corba": 412,
+  "Kaubojski Gulas": 334,
+  "Kaubojska Pita": 322,
+  "Kaubojski Obrok": 170,
+  "Kaubojska Kobasica": 407,
+
+  "Rakija Kruska": 87,
+  "Rakija Sljiva": 154,
+  "Rakija Jabuka": 229,
+
+  "Crno Vino": 315,
+  "Belo Vino": 192,
+  "Pivo": 260,
+  "Kafa": 372,
+
+  "Flasa Vode": 105,
+  "Kutija tompusa": 12,
+  "Kutija cigara": 14,
+  "Sibica": 85,
+
+  "Sok Od Jabuke": 30,
+  "Sok Od Narandze": 47,
+};
+
+// ======================================================
 // DISCORD CLIENT
 // ======================================================
 
@@ -39,7 +70,7 @@ const client = new Client({
 });
 
 // ======================================================
-// POMOĆNE FUNKCIJE
+// NORMALIZACIJA NAZIVA
 // ======================================================
 
 function normalizeName(name) {
@@ -48,38 +79,57 @@ function normalizeName(name) {
     .trim();
 }
 
+function stockKey(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function addCount(map, item, amount) {
   item = normalizeName(item);
   amount = Number(amount);
 
-  if (!item || !Number.isFinite(amount)) return;
+  if (!item || !Number.isFinite(amount)) {
+    return;
+  }
 
-  map.set(item, (map.get(item) || 0) + amount);
+  map.set(
+    item,
+    (map.get(item) || 0) + amount
+  );
 }
 
 function mapToSortedArray(map) {
   return [...map.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0], "hr", {
-      sensitivity: "base",
-    })
+    a[0].localeCompare(
+      b[0],
+      "hr",
+      { sensitivity: "base" }
+    )
   );
 }
 
 // ======================================================
-// TIMEZONE - EUROPE/ZAGREB
+// TIMEZONE EUROPE/ZAGREB
 // ======================================================
 
 function getTimeZoneOffset(date, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
+  const parts = new Intl.DateTimeFormat(
+    "en-US",
+    {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }
+  ).formatToParts(date);
 
   const values = {};
 
@@ -122,16 +172,20 @@ function zagrebDateToUTC(
     )
   );
 
-  let offset = getTimeZoneOffset(utc, TIMEZONE);
+  let offset = getTimeZoneOffset(
+    utc,
+    TIMEZONE
+  );
 
   let result = new Date(
     utc.getTime() - offset
   );
 
-  const secondOffset = getTimeZoneOffset(
-    result,
-    TIMEZONE
-  );
+  const secondOffset =
+    getTimeZoneOffset(
+      result,
+      TIMEZONE
+    );
 
   if (secondOffset !== offset) {
     result = new Date(
@@ -143,10 +197,13 @@ function zagrebDateToUTC(
 }
 
 // ======================================================
-// DATUM DD.MM.GGGG
+// DATUM
 // ======================================================
 
-function parseDateDMY(value, endOfDay = false) {
+function parseDateDMY(
+  value,
+  endOfDay = false
+) {
   const match = String(value || "")
     .trim()
     .match(
@@ -159,9 +216,13 @@ function parseDateDMY(value, endOfDay = false) {
   const month = Number(match[2]);
   const year = Number(match[3]);
 
-  // Provjeri postoji li stvarno taj datum
+  // Provjera postoji li datum
   const test = new Date(
-    Date.UTC(year, month - 1, day)
+    Date.UTC(
+      year,
+      month - 1,
+      day
+    )
   );
 
   if (
@@ -172,7 +233,7 @@ function parseDateDMY(value, endOfDay = false) {
     return null;
   }
 
-  // DO datum = do kraja dana
+  // DO DATUM = 23:59:59
   if (endOfDay) {
     return zagrebDateToUTC(
       year,
@@ -185,7 +246,7 @@ function parseDateDMY(value, endOfDay = false) {
     );
   }
 
-  // OD datum = od početka dana
+  // OD DATUM = 00:00
   return zagrebDateToUTC(
     year,
     month,
@@ -198,32 +259,37 @@ function parseDateDMY(value, endOfDay = false) {
 }
 
 function formatDate(date) {
-  return new Intl.DateTimeFormat("hr-HR", {
-    timeZone: TIMEZONE,
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    "hr-HR",
+    {
+      timeZone: TIMEZONE,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }
+  ).format(date);
 }
 
 // ======================================================
-// ČITANJE SHOP EMBEDA
+// PARSIRANJE SHOP PORUKA
 // ======================================================
 
 function parseEventFromMessage(message) {
   const embeds = message.embeds || [];
 
-  if (!embeds.length) return null;
+  if (!embeds.length) {
+    return null;
+  }
 
   for (const embed of embeds) {
-    const title = normalizeName(embed.title);
+    const title =
+      normalizeName(embed.title);
 
-    const description = normalizeName(
-      embed.description
-    );
+    const description =
+      normalizeName(embed.description);
 
     const fieldsText =
       embed.fields
@@ -276,19 +342,23 @@ function parseEventFromMessage(message) {
       type = "removed";
     }
 
-    if (!type) continue;
+    if (!type) {
+      continue;
+    }
 
     // ==================================================
-    // STORE ID
+    // PROVJERA STORE ID
     // ==================================================
 
-    const storeMatch = allText.match(
-      /store\s*ID\s*[:#-]?\s*([A-Za-z0-9_-]+)/i
-    );
+    const storeMatch =
+      allText.match(
+        /store\s*ID\s*[:#-]?\s*([A-Za-z0-9_-]+)/i
+      );
 
     if (
       storeMatch &&
-      String(storeMatch[1]) !== String(STORE_ID)
+      String(storeMatch[1]) !==
+        String(STORE_ID)
     ) {
       continue;
     }
@@ -304,7 +374,9 @@ function parseEventFromMessage(message) {
         /\bbought\s+(.+?)\s+x(\d+)\s+for\s+\$[\d.,]+/i
       );
 
-      if (!match) continue;
+      if (!match) {
+        continue;
+      }
 
       return {
         type: "sold",
@@ -324,14 +396,16 @@ function parseEventFromMessage(message) {
         /\blisted\s+(.+?)\s+x(\d+)\s+for\s+\$[\d.,]+/i
       );
 
-      // Rezervni format
+      // Rezervni parser
       if (!match) {
         match = text.match(
           /\blisted\s+(.+?)\s+x(\d+)(?:\s+in|\s+to|\s+store|$)/i
         );
       }
 
-      if (!match) continue;
+      if (!match) {
+        continue;
+      }
 
       return {
         type: "listed",
@@ -343,7 +417,7 @@ function parseEventFromMessage(message) {
     }
 
     // ==================================================
-    // SKINUTO S TEZGE
+    // SKINUTO
     // ==================================================
 
     if (type === "removed") {
@@ -351,7 +425,9 @@ function parseEventFromMessage(message) {
         /\bremoved\s+(.+?)\s+x(\d+)\s+from\s+(?:the\s+)?store/i
       );
 
-      if (!match) continue;
+      if (!match) {
+        continue;
+      }
 
       return {
         type: "removed",
@@ -367,7 +443,7 @@ function parseEventFromMessage(message) {
 }
 
 // ======================================================
-// DOHVATI PORUKE IZ PERIODA
+// DOHVATI PORUKE OD DATUMA DO DATUMA
 // ======================================================
 
 async function fetchMessagesInRange(
@@ -389,7 +465,9 @@ async function fetchMessagesInRange(
     }
 
     const batch =
-      await channel.messages.fetch(options);
+      await channel.messages.fetch(
+        options
+      );
 
     if (!batch.size) {
       break;
@@ -397,21 +475,29 @@ async function fetchMessagesInRange(
 
     let reachedOlderThanRange = false;
 
-    for (const message of batch.values()) {
-
-      // Poruka starija od OD datuma
-      if (message.createdAt < from) {
+    for (
+      const message of batch.values()
+    ) {
+      // Starije od početnog datuma
+      if (
+        message.createdAt < from
+      ) {
         reachedOlderThanRange = true;
         continue;
       }
 
-      // Poruka novija od DO datuma
-      if (message.createdAt > to) {
+      // Novije od završnog datuma
+      if (
+        message.createdAt > to
+      ) {
         continue;
       }
 
+      // Unutar perioda
       const event =
-        parseEventFromMessage(message);
+        parseEventFromMessage(
+          message
+        );
 
       if (event) {
         events.push(event);
@@ -438,7 +524,7 @@ async function fetchMessagesInRange(
 }
 
 // ======================================================
-// SEKCIJA
+// SEKCIJA IZVJEŠTAJA
 // ======================================================
 
 function section(title, map) {
@@ -446,13 +532,17 @@ function section(title, map) {
     mapToSortedArray(map);
 
   if (!entries.length) {
-    return `**${title}:**\nNema zapisa.`;
+    return (
+      `**${title}:**\n` +
+      `Nema zapisa.`
+    );
   }
 
-  const lines = entries.map(
-    ([item, qty]) =>
-      `• **${item}** — x${qty}`
-  );
+  const lines =
+    entries.map(
+      ([item, qty]) =>
+        `• **${item}** — x${qty}`
+    );
 
   return (
     `**${title}:**\n` +
@@ -461,9 +551,35 @@ function section(title, map) {
 }
 
 // ======================================================
-// TRENUTNO STANJE
+// NORMALIZIRAJ MAPU
+// ======================================================
+
+function normalizeStockMap(map) {
+  const normalized = new Map();
+
+  for (
+    const [item, qty] of map.entries()
+  ) {
+    const key =
+      stockKey(item);
+
+    normalized.set(
+      key,
+      (normalized.get(key) || 0) +
+        Number(qty)
+    );
+  }
+
+  return normalized;
+}
+
+// ======================================================
+// IZRAČUN STANJA
 //
-// STAVLJENO - PRODANO - SKINUTO
+// POČETNO
+// + STAVLJENO
+// - PRODANO
+// - SKINUTO
 // ======================================================
 
 function calculateCurrentStock(
@@ -471,32 +587,120 @@ function calculateCurrentStock(
   sold,
   removed
 ) {
-  const currentStock = new Map();
+  const currentStock =
+    new Map();
 
-  const allItems = new Set([
-    ...listed.keys(),
-    ...sold.keys(),
-    ...removed.keys(),
+  const startingByKey =
+    new Map();
+
+  // Početno stanje
+  for (
+    const [item, qty]
+    of Object.entries(
+      STARTING_STOCK
+    )
+  ) {
+    startingByKey.set(
+      stockKey(item),
+      {
+        name: item,
+        quantity: qty,
+      }
+    );
+  }
+
+  // Normaliziraj shop podatke
+  const listedNormalized =
+    normalizeStockMap(listed);
+
+  const soldNormalized =
+    normalizeStockMap(sold);
+
+  const removedNormalized =
+    normalizeStockMap(removed);
+
+  // Svi artikli
+  const allKeys = new Set([
+    ...startingByKey.keys(),
+    ...listedNormalized.keys(),
+    ...soldNormalized.keys(),
+    ...removedNormalized.keys(),
   ]);
 
-  for (const item of allItems) {
+  for (const key of allKeys) {
+    const starting =
+      startingByKey.get(key)
+        ?.quantity || 0;
+
     const listedQty =
-      listed.get(item) || 0;
+      listedNormalized.get(key) || 0;
 
     const soldQty =
-      sold.get(item) || 0;
+      soldNormalized.get(key) || 0;
 
     const removedQty =
-      removed.get(item) || 0;
+      removedNormalized.get(key) || 0;
 
-    const stock =
+    // GLAVNA RAČUNICA
+    const finalStock =
+      starting +
       listedQty -
       soldQty -
       removedQty;
 
+    // Naziv artikla
+    let displayName =
+      startingByKey.get(key)?.name;
+
+    if (!displayName) {
+      for (
+        const item
+        of listed.keys()
+      ) {
+        if (
+          stockKey(item) === key
+        ) {
+          displayName = item;
+          break;
+        }
+      }
+    }
+
+    if (!displayName) {
+      for (
+        const item
+        of sold.keys()
+      ) {
+        if (
+          stockKey(item) === key
+        ) {
+          displayName = item;
+          break;
+        }
+      }
+    }
+
+    if (!displayName) {
+      for (
+        const item
+        of removed.keys()
+      ) {
+        if (
+          stockKey(item) === key
+        ) {
+          displayName = item;
+          break;
+        }
+      }
+    }
+
+    if (!displayName) {
+      displayName = key;
+    }
+
     currentStock.set(
-      item,
-      stock
+      displayName,
+      finalStock
     );
   }
 
@@ -507,18 +711,23 @@ function calculateCurrentStock(
 // IZVJEŠTAJ
 // ======================================================
 
-function buildReport(events, from, to) {
+function buildReport(
+  events,
+  from,
+  to
+) {
   const sold = new Map();
   const listed = new Map();
   const removed = new Map();
 
   // ==================================================
-  // ZBROJI SVE
+  // ZBROJI DOGAĐAJE SAMO IZ ZADANOG PERIODA
   // ==================================================
 
   for (const event of events) {
-
-    if (event.type === "sold") {
+    if (
+      event.type === "sold"
+    ) {
       addCount(
         sold,
         event.item,
@@ -526,7 +735,9 @@ function buildReport(events, from, to) {
       );
     }
 
-    if (event.type === "listed") {
+    if (
+      event.type === "listed"
+    ) {
       addCount(
         listed,
         event.item,
@@ -534,7 +745,9 @@ function buildReport(events, from, to) {
       );
     }
 
-    if (event.type === "removed") {
+    if (
+      event.type === "removed"
+    ) {
       addCount(
         removed,
         event.item,
@@ -544,7 +757,7 @@ function buildReport(events, from, to) {
   }
 
   // ==================================================
-  // IZRAČUNAJ TRENUTNO STANJE
+  // IZRAČUNAJ STANJE
   // ==================================================
 
   const currentStock =
@@ -591,13 +804,14 @@ function buildReport(events, from, to) {
     "",
 
     section(
-      "🏪 TRENUTNO STANJE NA TEZGI",
+      "🏪 STANJE NA TEZGI NAKON OBRAČUNA",
       currentStock
     ),
 
     "",
 
-    "📌 **Računica:** STAVLJENO − PRODANO − SKINUTO",
+    "📌 **RAČUNICA:**",
+    "Početno stanje + Stavljeno − Prodano − Skinuto",
 
     "",
 
@@ -609,34 +823,38 @@ function buildReport(events, from, to) {
 // ČITANJE !SABERI KOMANDE
 // ======================================================
 
-function parseCommandArgs(content) {
-
+function parseCommandArgs(
+  content
+) {
   /*
-    PODRŽANO:
+    PRIMJERI:
 
-    !saberi 02.09.2026 01.10.2026
+    !saberi 02.10.2026 do 05.10.2026
 
-    !saberi 02.09.2026 do 01.10.2026
+    !saberi 02.10.2026 05.10.2026
 
-    !saberi 02/09/2026 01/10/2026
+    !saberi 02/10/2026 05/10/2026
 
-    !saberi 02-09-2026 01-10-2026
-
-    ISTI DAN:
-
-    !saberi 01.10.2026 do 01.10.2026
+    !saberi 02-10-2026 05-10-2026
   */
 
-  const args = content
-    .trim()
-    .split(/\s+/)
-    .slice(1);
+  const args =
+    content
+      .trim()
+      .split(/\s+/)
+      .slice(1);
 
-  const dates = args.filter((x) =>
-    /^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}$/.test(x)
-  );
+  const dates =
+    args.filter(
+      (x) =>
+        /^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}$/.test(
+          x
+        )
+    );
 
-  if (dates.length !== 2) {
+  if (
+    dates.length !== 2
+  ) {
     return null;
   }
 
@@ -652,11 +870,11 @@ function parseCommandArgs(content) {
       true
     );
 
-  if (!from || !to) {
-    return null;
-  }
-
-  if (from > to) {
+  if (
+    !from ||
+    !to ||
+    from > to
+  ) {
     return null;
   }
 
@@ -670,54 +888,58 @@ function parseCommandArgs(content) {
 // BOT ONLINE
 // ======================================================
 
-client.once("ready", () => {
+client.once(
+  "ready",
+  () => {
+    console.log(
+      `✅ Bot je online kao ${client.user.tag}`
+    );
 
-  console.log(
-    `✅ Bot je online kao ${client.user.tag}`
-  );
+    console.log(
+      `🏪 Store ID: ${STORE_ID}`
+    );
 
-  console.log(
-    `🏪 Store ID: ${STORE_ID}`
-  );
+    console.log(
+      `📍 Timezone: ${TIMEZONE}`
+    );
 
-  console.log(
-    `📍 Timezone: ${TIMEZONE}`
-  );
-
-  console.log(
-    `📊 Report channel: ${REPORT_CHANNEL_ID}`
-  );
-});
+    console.log(
+      `📊 Report channel: ${REPORT_CHANNEL_ID}`
+    );
+  }
+);
 
 // ======================================================
-// !SABERI
+// !SABERI KOMANDA
 // ======================================================
 
 client.on(
   "messageCreate",
+
   async (message) => {
-
     try {
-
-      // Ignoriraj vlastite poruke
+      // Ignoriraj svoje poruke
       if (
         message.author.bot &&
-        message.author.id === client.user.id
+        message.author.id ===
+          client.user.id
       ) {
         return;
       }
 
-      // Mora početi s !saberi
+      // Samo !saberi
       if (
         !message.content
           ?.toLowerCase()
-          .startsWith("!saberi")
+          .startsWith(
+            "!saberi"
+          )
       ) {
         return;
       }
 
       // ==================================================
-      // DATUMI
+      // DATUM
       // ==================================================
 
       const parsed =
@@ -726,7 +948,6 @@ client.on(
         );
 
       if (!parsed) {
-
         await message.reply(
           "❌ **Pogrešan format.**\n\n" +
 
@@ -734,14 +955,14 @@ client.on(
           "`!saberi DD.MM.GGGG do DD.MM.GGGG`\n\n" +
 
           "Primjer:\n" +
-          "`!saberi 02.09.2026 do 01.10.2026`"
+          "`!saberi 02.10.2026 do 05.10.2026`"
         );
 
         return;
       }
 
       // ==================================================
-      // KANAL
+      // REPORT CHANNEL
       // ==================================================
 
       const channel =
@@ -754,7 +975,6 @@ client.on(
         !channel.isTextBased() ||
         !channel.messages
       ) {
-
         await message.reply(
           "❌ REPORT_CHANNEL_ID nije valjan tekstualni kanal."
         );
@@ -768,13 +988,17 @@ client.on(
 
       const loadingMessage =
         await message.reply(
-          `⏳ Računam podatke...\n\n` +
+          `⏳ Računam stanje...\n\n` +
 
-          `🗓️ **${formatDate(parsed.from)} → ${formatDate(parsed.to)}**`
+          `🗓️ **${formatDate(
+            parsed.from
+          )} → ${formatDate(
+            parsed.to
+          )}**`
         );
 
       // ==================================================
-      // DOHVATI SVE
+      // UZMI DOGAĐAJE SAMO OD - DO
       // ==================================================
 
       const events =
@@ -785,7 +1009,7 @@ client.on(
         );
 
       // ==================================================
-      // NAPRAVI REPORT
+      // REPORT
       // ==================================================
 
       const report =
@@ -795,17 +1019,18 @@ client.on(
           parsed.to
         );
 
-      // Makni loading poruku
+      // Makni loading
       try {
         await loadingMessage.delete();
       } catch (_) {}
 
       // ==================================================
-      // REPORT ISPOD 2000 ZNAKOVA
+      // AKO STANE U JEDNU PORUKU
       // ==================================================
 
-      if (report.length <= 2000) {
-
+      if (
+        report.length <= 2000
+      ) {
         await message.reply(
           report
         );
@@ -814,7 +1039,7 @@ client.on(
       }
 
       // ==================================================
-      // AKO JE REPORT PREVELIK
+      // PODIJELI U VIŠE PORUKA
       // ==================================================
 
       const chunks = [];
@@ -822,9 +1047,9 @@ client.on(
       let current = "";
 
       for (
-        const line of report.split("\n")
+        const line
+        of report.split("\n")
       ) {
-
         if (
           (
             current +
@@ -832,8 +1057,9 @@ client.on(
             "\n"
           ).length > 1900
         ) {
-
-          if (current.trim()) {
+          if (
+            current.trim()
+          ) {
             chunks.push(
               current.trim()
             );
@@ -846,38 +1072,37 @@ client.on(
           line + "\n";
       }
 
-      if (current.trim()) {
+      if (
+        current.trim()
+      ) {
         chunks.push(
           current.trim()
         );
       }
 
       // ==================================================
-      // POŠALJI SVE DIJELOVE
+      // POŠALJI
       // ==================================================
 
       for (
-        const chunk of chunks
+        const chunk
+        of chunks
       ) {
-
         await message.channel.send(
           chunk
         );
       }
 
     } catch (error) {
-
       console.error(
         "❌ Greška kod !saberi:",
         error
       );
 
       try {
-
         await message.reply(
           "❌ Dogodila se greška. Provjeri Railway log."
         );
-
       } catch (_) {}
     }
   }
