@@ -4,8 +4,11 @@ const {
   Client,
   GatewayIntentBits,
   Partials,
-  EmbedBuilder,
 } = require("discord.js");
+
+// ==========================================
+// POSTAVKE
+// ==========================================
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const REPORT_CHANNEL_ID = process.env.REPORT_CHANNEL_ID;
@@ -13,14 +16,18 @@ const STORE_ID = process.env.STORE_ID || "61";
 const TIMEZONE = process.env.TIMEZONE || "Europe/Zagreb";
 
 if (!TOKEN) {
-  console.error("Nedostaje DISCORD_TOKEN u .env");
+  console.error("❌ Nedostaje DISCORD_TOKEN u environment variables.");
   process.exit(1);
 }
 
 if (!REPORT_CHANNEL_ID) {
-  console.error("Nedostaje REPORT_CHANNEL_ID u .env");
+  console.error("❌ Nedostaje REPORT_CHANNEL_ID u environment variables.");
   process.exit(1);
 }
+
+// ==========================================
+// DISCORD CLIENT
+// ==========================================
 
 const client = new Client({
   intents: [
@@ -31,6 +38,10 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+// ==========================================
+// POMOĆNE FUNKCIJE
+// ==========================================
+
 function normalizeName(name) {
   return String(name || "")
     .replace(/\s+/g, " ")
@@ -40,14 +51,20 @@ function normalizeName(name) {
 function addCount(map, item, amount) {
   item = normalizeName(item);
   amount = Number(amount);
+
   if (!item || !Number.isFinite(amount)) return;
+
   map.set(item, (map.get(item) || 0) + amount);
 }
 
+// ==========================================
+// DATUM
+// ==========================================
+
 function parseDateDMY(value, endOfDay = false) {
-  const match = String(value || "").trim().match(
-    /^(\\d{1,2})[.\\/-](\\d{1,2})[.\\/-](\\d{4})$/
-  );
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
 
   if (!match) return null;
 
@@ -55,22 +72,38 @@ function parseDateDMY(value, endOfDay = false) {
   const month = Number(match[2]);
   const year = Number(match[3]);
 
+  // Provjera postoji li stvarno taj datum
+  const testDate = new Date(year, month - 1, day);
+
   if (
-    !Number.isInteger(day) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(year) ||
-    month < 1 || month > 12 || day < 1 || day > 31
+    testDate.getFullYear() !== year ||
+    testDate.getMonth() !== month - 1 ||
+    testDate.getDate() !== day
   ) {
     return null;
   }
 
-  // Interpret the date as local Zagreb time, then convert to an absolute Date.
-  const isoTime = endOfDay ? "23:59:59.999" : "00:00:00.000";
-  const iso = `${year.toString().padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${isoTime}+02:00`;
-  const date = new Date(iso);
+  if (endOfDay) {
+    return new Date(
+      year,
+      month - 1,
+      day,
+      23,
+      59,
+      59,
+      999
+    );
+  }
 
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
+  return new Date(
+    year,
+    month - 1,
+    day,
+    0,
+    0,
+    0,
+    0
+  );
 }
 
 function formatDate(date) {
@@ -84,62 +117,131 @@ function formatDate(date) {
   }).format(date);
 }
 
+// ==========================================
+// SORTIRANJE
+// ==========================================
+
 function mapToSortedArray(map) {
   return [...map.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0], "hr", { sensitivity: "base" })
+    a[0].localeCompare(
+      b[0],
+      "hr",
+      { sensitivity: "base" }
+    )
   );
 }
 
+// ==========================================
+// ČITANJE SHOP PORUKA
+// ==========================================
+
 function parseEventFromMessage(message) {
-  // Bot messages from the shop are expected to contain one of these embed titles.
   const embeds = message.embeds || [];
+
   if (!embeds.length) return null;
 
   for (const embed of embeds) {
     const title = normalizeName(embed.title);
     const description = normalizeName(embed.description);
-    const text = `${title} ${description}`;
+
+    const fieldsText =
+      embed.fields
+        ?.map((field) => `${field.name} ${field.value}`)
+        .join(" ") || "";
+
+    const text = `${title} ${description} ${fieldsText}`
+      .replace(/\s+/g, " ")
+      .trim();
 
     let type = null;
-    if (/^Purchase Made$/i.test(title) || /Purchase Made/i.test(text)) {
+
+    // PRODANO
+    if (
+      /^Purchase Made$/i.test(title) ||
+      /Purchase Made/i.test(text)
+    ) {
       type = "sold";
-    } else if (/^New Item Listed$/i.test(title) || /New Item Listed/i.test(text)) {
+    }
+
+    // STAVLJENO NA TEZGU
+    else if (
+      /^New Item Listed$/i.test(title) ||
+      /New Item Listed/i.test(text)
+    ) {
       type = "listed";
-    } else if (/^Item Removed$/i.test(title) || /Item Removed/i.test(text)) {
+    }
+
+    // SKINUTO S TEZGE
+    else if (
+      /^Item Removed$/i.test(title) ||
+      /Item Removed/i.test(text)
+    ) {
       type = "removed";
     }
 
     if (!type) continue;
 
-    // Examples supported:
-    // "Franklin Smith (...) bought Kaubojska Kobasica x3 for $13.50 from store ID 61."
-    // "Lucija Crow (...) listed Sok Od Jabuke x1 for $9.00 in store ID 61."
-    // "Lucija Crow (...) removed Kaubojska Corba x5 from store ID 61."
-    const combined = `${description} ${embed.fields?.map(f => `${f.name} ${f.value}`).join(" ") || ""}`
-      .replace(/\s+/g, " ")
-      .trim();
+    // ======================================
+    // PROVJERA STORE ID
+    // ======================================
 
-    const storeMatch = combined.match(/store ID\\s*([A-Za-z0-9_-]+)/i);
-    if (storeMatch && String(storeMatch[1]) !== String(STORE_ID)) {
-      return null;
+    const storeMatch = text.match(
+      /store ID\s*[:#-]?\s*([A-Za-z0-9_-]+)/i
+    );
+
+    if (
+      storeMatch &&
+      String(storeMatch[1]) !== String(STORE_ID)
+    ) {
+      continue;
     }
 
     let match = null;
+
+    // ======================================
+    // PURCHASE MADE
+    // ======================================
+
     if (type === "sold") {
-      match = combined.match(/\\bbought\\s+(.+?)\\s+x(\\d+)\\s+for\\s+\\$([\\d.,]+)/i);
-    } else if (type === "listed") {
-      match = combined.match(/\\blisted\\s+(.+?)\\s+x(\\d+)\\s+for\\s+\\$([\\d.,]+)/i);
-    } else if (type === "removed") {
-      match = combined.match(/\\bremoved\\s+(.+?)\\s+x(\\d+)\\s+from\\s+store/i);
+      match = text.match(
+        /\bbought\s+(.+?)\s+x(\d+)\s+for\s+\$([\d.,]+)/i
+      );
     }
 
-    if (!match) return null;
+    // ======================================
+    // NEW ITEM LISTED
+    // ======================================
+
+    else if (type === "listed") {
+      match = text.match(
+        /\blisted\s+(.+?)\s+x(\d+)\s+for\s+\$([\d.,]+)/i
+      );
+    }
+
+    // ======================================
+    // ITEM REMOVED
+    // ======================================
+
+    else if (type === "removed") {
+      match = text.match(
+        /\bremoved\s+(.+?)\s+x(\d+)\s+from\s+store/i
+      );
+    }
+
+    if (!match) continue;
 
     return {
-      type,
+      type: type,
       item: normalizeName(match[1]),
       quantity: Number(match[2]),
-      price: type === "removed" ? null : Number(String(match[3]).replace(",", ".")),
+
+      price:
+        type === "removed"
+          ? null
+          : Number(
+              String(match[3]).replace(",", ".")
+            ),
+
       createdAt: message.createdAt,
       messageId: message.id,
     };
@@ -148,37 +250,65 @@ function parseEventFromMessage(message) {
   return null;
 }
 
+// ==========================================
+// DOHVATI SVE PORUKE IZ PERIODA
+// ==========================================
+
 async function fetchMessagesInRange(channel, from, to) {
   const events = [];
-  let before;
+
+  let before = undefined;
 
   while (true) {
-    const options = { limit: 100 };
-    if (before) options.before = before;
+    const options = {
+      limit: 100,
+    };
+
+    if (before) {
+      options.before = before;
+    }
 
     const batch = await channel.messages.fetch(options);
-    if (!batch.size) break;
+
+    if (!batch.size) {
+      break;
+    }
 
     let reachedOlderThanRange = false;
 
     for (const message of batch.values()) {
+
+      // Poruka je starija od početnog datuma
       if (message.createdAt < from) {
         reachedOlderThanRange = true;
         continue;
       }
 
-      if (message.createdAt <= to) {
+      // Poruka je unutar zadanog perioda
+      if (
+        message.createdAt >= from &&
+        message.createdAt <= to
+      ) {
         const event = parseEventFromMessage(message);
-        if (event) events.push(event);
+
+        if (event) {
+          events.push(event);
+        }
       }
     }
 
     const oldest = batch.last();
-    if (!oldest) break;
+
+    if (!oldest) {
+      break;
+    }
 
     before = oldest.id;
 
-    if (reachedOlderThanRange || oldest.createdAt < from) {
+    if (
+      reachedOlderThanRange ||
+      oldest.createdAt < from
+    ) {
       break;
     }
   }
@@ -186,13 +316,28 @@ async function fetchMessagesInRange(channel, from, to) {
   return events;
 }
 
+// ==========================================
+// SEKCIJE IZVJEŠTAJA
+// ==========================================
+
 function section(title, map) {
   const entries = mapToSortedArray(map);
-  if (!entries.length) return `**${title}:**\\nNema zapisa.`;
 
-  const lines = entries.map(([item, qty]) => `• **${item}** — x${qty}`);
-  return `**${title}:**\\n${lines.join("\\n")}`;
+  if (!entries.length) {
+    return `**${title}:**\nNema zapisa.`;
+  }
+
+  const lines = entries.map(
+    ([item, qty]) =>
+      `• **${item}** — x${qty}`
+  );
+
+  return `**${title}:**\n${lines.join("\n")}`;
 }
+
+// ==========================================
+// IZVJEŠTAJ
+// ==========================================
 
 function buildReport(events, from, to) {
   const sold = new Map();
@@ -200,99 +345,306 @@ function buildReport(events, from, to) {
   const removed = new Map();
 
   for (const event of events) {
-    if (event.type === "sold") addCount(sold, event.item, event.quantity);
-    if (event.type === "listed") addCount(listed, event.item, event.quantity);
-    if (event.type === "removed") addCount(removed, event.item, event.quantity);
+
+    if (event.type === "sold") {
+      addCount(
+        sold,
+        event.item,
+        event.quantity
+      );
+    }
+
+    if (event.type === "listed") {
+      addCount(
+        listed,
+        event.item,
+        event.quantity
+      );
+    }
+
+    if (event.type === "removed") {
+      addCount(
+        removed,
+        event.item,
+        event.quantity
+      );
+    }
   }
 
-  const report = [
+  return [
     `📊 **SABERI — Store ID ${STORE_ID}**`,
-    `🗓️ **Period:** ${formatDate(from)} → ${formatDate(to)}`,
-    "",
-    section("🛒 PRODANO", sold),
-    "",
-    section("📦 NAPRAVLJENO / STAVLJENO NA TEZGU", listed),
-    "",
-    section("🗑️ SKINUTO S TEZGE", removed),
-    "",
-    `Ukupno zapisa: **${events.length}**`,
-  ].join("\\n");
 
-  return report;
+    `🗓️ **Period:** ${formatDate(from)} → ${formatDate(to)}`,
+
+    "",
+
+    section(
+      "🛒 PRODANO",
+      sold
+    ),
+
+    "",
+
+    section(
+      "📦 NAPRAVLJENO / STAVLJENO NA TEZGU",
+      listed
+    ),
+
+    "",
+
+    section(
+      "🗑️ SKINUTO S TEZGE",
+      removed
+    ),
+
+    "",
+
+    `📋 Ukupno pronađenih zapisa: **${events.length}**`,
+  ].join("\n");
 }
+
+// ==========================================
+// ČITANJE !SABERI KOMANDE
+// ==========================================
 
 function parseCommandArgs(content) {
-  // Supports:
-  // !saberi 01.10.2026 10.10.2026
-  // !saberi 01.10.2026 do 10.10.2026
-  const args = content.trim().split(/\\s+/).slice(1);
-  const dates = args.filter(x => /^\\d{1,2}[.\\/-]\\d{1,2}[.\\/-]\\d{4}$/.test(x));
 
-  if (dates.length < 2) return null;
+  /*
+    PODRŽANO:
 
-  const from = parseDateDMY(dates[0], false);
-  const to = parseDateDMY(dates[1], true);
+    !saberi 01.10.2026 10.10.2026
 
-  if (!from || !to || from > to) return null;
-  return { from, to };
+    !saberi 01.10.2026 do 10.10.2026
+
+    !saberi 01/10/2026 10/10/2026
+
+    !saberi 01-10-2026 10-10-2026
+
+    Može i isti dan:
+
+    !saberi 02.10.2026 02.10.2026
+  */
+
+  const args = content
+    .trim()
+    .split(/\s+/)
+    .slice(1);
+
+  const dates = args.filter((x) =>
+    /^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}$/.test(x)
+  );
+
+  if (dates.length !== 2) {
+    return null;
+  }
+
+  const from = parseDateDMY(
+    dates[0],
+    false
+  );
+
+  const to = parseDateDMY(
+    dates[1],
+    true
+  );
+
+  if (!from || !to) {
+    return null;
+  }
+
+  if (from > to) {
+    return null;
+  }
+
+  return {
+    from,
+    to,
+  };
 }
 
+// ==========================================
+// BOT ONLINE
+// ==========================================
+
 client.once("ready", () => {
-  console.log(`Bot je online kao ${client.user.tag}`);
+  console.log(
+    `✅ Bot je online kao ${client.user.tag}`
+  );
+
+  console.log(
+    `🏪 Store ID: ${STORE_ID}`
+  );
+
+  console.log(
+    `📊 Report channel: ${REPORT_CHANNEL_ID}`
+  );
 });
+
+// ==========================================
+// !SABERI
+// ==========================================
 
 client.on("messageCreate", async (message) => {
   try {
-    if (message.author.bot && message.author.id === client.user.id) return;
-    if (!message.content?.toLowerCase().startsWith("!saberi")) return;
 
-    const parsed = parseCommandArgs(message.content);
+    // Ignoriraj vlastite poruke bota
+    if (
+      message.author.bot &&
+      message.author.id === client.user.id
+    ) {
+      return;
+    }
+
+    if (
+      !message.content
+        ?.toLowerCase()
+        .startsWith("!saberi")
+    ) {
+      return;
+    }
+
+    // ======================================
+    // DATUMI
+    // ======================================
+
+    const parsed =
+      parseCommandArgs(message.content);
 
     if (!parsed) {
       await message.reply(
-        "❌ Format: `!saberi DD.MM.GGGG DD.MM.GGGG`\\n" +
-        "Primjer: `!saberi 01.10.2026 10.10.2026`"
+        "❌ **Pogrešan format.**\n\n" +
+        "Koristi:\n" +
+        "`!saberi DD.MM.GGGG DD.MM.GGGG`\n\n" +
+        "Primjer:\n" +
+        "`!saberi 01.10.2026 10.10.2026`\n\n" +
+        "Može i:\n" +
+        "`!saberi 01.10.2026 do 10.10.2026`"
       );
+
       return;
     }
 
-    const channel = await client.channels.fetch(REPORT_CHANNEL_ID);
+    // ======================================
+    // REPORT CHANNEL
+    // ======================================
 
-    if (!channel || !channel.isTextBased() || !channel.messages) {
-      await message.reply("❌ REPORT_CHANNEL_ID nije valjan tekstualni kanal.");
+    const channel =
+      await client.channels.fetch(
+        REPORT_CHANNEL_ID
+      );
+
+    if (
+      !channel ||
+      !channel.isTextBased() ||
+      !channel.messages
+    ) {
+      await message.reply(
+        "❌ REPORT_CHANNEL_ID nije valjan tekstualni kanal."
+      );
+
       return;
     }
 
-    await message.reply("⏳ Računam podatke iz zadanog perioda...");
+    // ======================================
+    // POČETAK RAČUNANJA
+    // ======================================
 
-    const events = await fetchMessagesInRange(channel, parsed.from, parsed.to);
-    const report = buildReport(events, parsed.from, parsed.to);
+    const loadingMessage =
+      await message.reply(
+        `⏳ Računam podatke za period:\n` +
+        `**${formatDate(parsed.from)} → ${formatDate(parsed.to)}**`
+      );
 
-    // Discord message limit je 2000 znakova.
+    // ======================================
+    // DOHVATI PORUKE
+    // ======================================
+
+    const events =
+      await fetchMessagesInRange(
+        channel,
+        parsed.from,
+        parsed.to
+      );
+
+    // ======================================
+    // NAPRAVI IZVJEŠTAJ
+    // ======================================
+
+    const report =
+      buildReport(
+        events,
+        parsed.from,
+        parsed.to
+      );
+
+    // Makni loading poruku
+    try {
+      await loadingMessage.delete();
+    } catch (_) {}
+
+    // ======================================
+    // AKO JE ISPOD 2000 ZNAKOVA
+    // ======================================
+
     if (report.length <= 2000) {
       await message.reply(report);
       return;
     }
 
+    // ======================================
+    // AKO JE IZVJEŠTAJ PREVELIK
+    // PODIJELI GA U VIŠE PORUKA
+    // ======================================
+
     const chunks = [];
+
     let current = "";
 
-    for (const line of report.split("\\n")) {
-      if ((current + line + "\\n").length > 1900) {
-        chunks.push(current);
+    for (const line of report.split("\n")) {
+
+      if (
+        (current + line + "\n").length >
+        1900
+      ) {
+        if (current.trim()) {
+          chunks.push(current.trim());
+        }
+
         current = "";
       }
-      current += line + "\\n";
+
+      current += line + "\n";
     }
-    if (current) chunks.push(current);
+
+    if (current.trim()) {
+      chunks.push(current.trim());
+    }
+
+    // ======================================
+    // POŠALJI SVE DIJELOVE
+    // ======================================
 
     for (const chunk of chunks) {
-      await message.channel.send(chunk.trim());
+      await message.channel.send(chunk);
     }
+
   } catch (error) {
-    console.error(error);
-    await message.reply("❌ Dogodila se greška. Provjeri konzolu bota.");
+
+    console.error(
+      "❌ Greška kod !saberi:",
+      error
+    );
+
+    try {
+      await message.reply(
+        "❌ Dogodila se greška. Provjeri Railway log."
+      );
+    } catch (_) {}
   }
 });
+
+// ==========================================
+// LOGIN
+// ==========================================
 
 client.login(TOKEN);
